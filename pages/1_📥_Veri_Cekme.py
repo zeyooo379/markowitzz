@@ -1,5 +1,5 @@
 """
-1_📥_Veri_Cekme: BIST hisse senedi fiyat verilerini çekme ve önizleme
+1_📥_Veri_Cekme: BIST hisse senedi fiyat verilerini çekme ve dönemsel ortalama getiriler
 """
 
 from datetime import datetime, timedelta
@@ -12,10 +12,10 @@ from utils.stock_data import hisse_verisi_cek
 
 st.set_page_config(page_title="Veri Çekme — Markowitzz", page_icon="📥", layout="wide")
 
-st.title("📥 BIST Veri Çekme & Zaman Penceresi")
+st.title("📥 BIST Veri Çekme & Dönemsel Ortalama Getiriler")
 st.markdown("""
 Analiz etmek istediğiniz hisseleri ve zaman periyodunu seçin. 
-İster **3 aylık**, ister **yıllık** veri çekebilirsiniz; sistem hesaplamaları seçtiğiniz bu döneme göre ölçeklendirecektir.
+İster **3 aylık**, ister **yıllık** veri çekebilirsiniz; hisselerin o dönemdeki ortalama getirileri ve performansı anlık hesaplanır.
 """)
 
 # --- Yan Menü / Kontrol Alanı ---
@@ -99,16 +99,22 @@ if veri_cek_btn or st.session_state.get("prices") is None:
 prices = st.session_state.get("prices")
 
 if prices is not None and not prices.empty:
-    n_days = len(prices)
+    daily_returns = prices.pct_change(fill_method=None).dropna()
+    n_days = len(daily_returns)
     start_fmt = prices.index[0].strftime("%d.%m.%Y")
     end_fmt = prices.index[-1].strftime("%d.%m.%Y")
     
+    # Ortalama getiriler
+    daily_mean_pct = daily_returns.mean() * 100
+    period_mean_pct = daily_mean_pct * n_days
+    basket_avg_period = float(period_mean_pct.mean())
+
     # Bilgi Metrikleri
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("İşlem Günü Sayısı (T)", f"{n_days} Gün", help="Seçtiğiniz dönemdeki gerçek borsa seans sayısı")
+    m1.metric("İşlem Günü Sayısı (T)", f"{n_days} Gün", help="Seçilen dönemdeki borsa seans sayısı")
     m2.metric("Takvim Dönemi", st.session_state.get("period_name", periyot_tipi))
     m3.metric("Tarih Aralığı", f"{start_fmt} - {end_fmt}")
-    m4.metric("Seçilen Hisse Sayısı", len(prices.columns))
+    m4.metric("Sepet Ortalama Getirisi", f"%{basket_avg_period:.2f}")
 
     st.markdown("---")
     
@@ -131,21 +137,31 @@ if prices is not None and not prices.empty:
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # Son Fiyatlar Tablosu
-    st.subheader("📋 Çekilen Veri Özeti")
+    # Detaylı Ortalama Getiri Tablosu
+    st.subheader("📋 Çekilen Hisselerin O Dönemdeki Ortalama Getirileri")
     summary_data = []
     for col in prices.columns:
         ilk = prices[col].iloc[0]
         son = prices[col].iloc[-1]
-        degisim_pct = ((son / ilk) - 1) * 100
+        cum_ret = ((son / ilk) - 1) * 100
+        mean_d = daily_mean_pct[col]
+        mean_p = period_mean_pct[col]
+        ann_p = mean_d * 252
+
         summary_data.append({
             "Sembol": col,
             "Şirket": BIST_HISSELER.get(col, col),
-            "Başlangıç Fiyatı (TL)": round(ilk, 2),
+            "Başlangıç (TL)": round(ilk, 2),
             "Son Kapanış (TL)": round(son, 2),
-            f"Seçilen Dönem Net Getiri (%)": round(degisim_pct, 2),
+            f"Dönemsel Ortalama Getiri ({n_days} Gün) (%)": round(mean_p, 2),
+            f"Dönem Kümülatif Net Getirisi (%)": round(cum_ret, 2),
+            "Ortalama Günlük Getiri (%)": round(mean_d, 3),
+            "Yıllıklandırılmış Eşdeğeri (%)": round(ann_p, 2),
         })
-    st.dataframe(pd.DataFrame(summary_data), use_container_width=True, hide_index=True)
+    df_summary = pd.DataFrame(summary_data).sort_values(
+        by=f"Dönemsel Ortalama Getiri ({n_days} Gün) (%)", ascending=False
+    )
+    st.dataframe(df_summary, use_container_width=True, hide_index=True)
 
     st.info("👉 Şimdi sol menüden **📊 2_Donemsel_Risk_Getiri** sayfasına geçerek dönemsel kovaryans ve getiri dağılımlarını inceleyebilirsiniz.")
 else:
