@@ -263,3 +263,145 @@ def simulate_monte_carlo(
         "Sharpe": results[2],
     })
     return df
+
+
+def get_five_frontier_portfolios(
+    expected_returns: pd.Series,
+    cov_matrix: pd.DataFrame,
+    risk_free_rate: float = 0.0,
+    max_weight: float = 1.0,
+) -> List[Dict[str, Any]]:
+    """
+    Etkin Sınır (Efficient Frontier) üzerinde 5 stratejik portföy hesaplar:
+    - P1: Çok Düşük Risk (Defansif / Min Volatilite)
+    - P2: Temkinli Büyüme (Düşük-Orta Risk)
+    - P3: Optimal Denge (Maksimum Sharpe / Teğet Portföy)
+    - P4: Dinamik Büyüme (Orta-Yüksek Risk)
+    - P5: Agresif (Maksimum Getiri)
+    """
+    n_assets = len(expected_returns)
+    mu = expected_returns.values
+    sigma = cov_matrix.values
+    symbols = list(expected_returns.index)
+    bounds = tuple((0.0, max_weight) for _ in range(n_assets))
+    init_weights = np.array([1.0 / n_assets] * n_assets)
+    sum_constraint = {"type": "eq", "fun": lambda w: np.sum(w) - 1.0}
+
+    # 1. P1: Minimum Volatilite
+    def min_vol_obj(w):
+        return np.sqrt(np.dot(w.T, np.dot(sigma, w)))
+    
+    res_min_vol = minimize(min_vol_obj, init_weights, method="SLSQP", bounds=bounds, constraints=sum_constraint)
+    w_min = np.clip(res_min_vol.x, 0, max_weight)
+    w_min /= np.sum(w_min)
+    r_min, v_min, s_min = portfolio_performance(w_min, mu, sigma, risk_free_rate)
+
+    # 3. P3: Maksimum Sharpe
+    def neg_sharpe_obj(w):
+        r, v, s = portfolio_performance(w, mu, sigma, risk_free_rate)
+        return -s
+
+    res_max_sh = minimize(neg_sharpe_obj, init_weights, method="SLSQP", bounds=bounds, constraints=sum_constraint)
+    w_sh = np.clip(res_max_sh.x, 0, max_weight)
+    w_sh /= np.sum(w_sh)
+    r_sh, v_sh, s_sh = portfolio_performance(w_sh, mu, sigma, risk_free_rate)
+
+    # 5. P5: Maksimum Getiri
+    def neg_ret_obj(w):
+        return -np.dot(w, mu)
+
+    res_max_ret = minimize(neg_ret_obj, init_weights, method="SLSQP", bounds=bounds, constraints=sum_constraint)
+    w_max_ret = np.clip(res_max_ret.x, 0, max_weight)
+    w_max_ret /= np.sum(w_max_ret)
+    r_max, v_max, s_max = portfolio_performance(w_max_ret, mu, sigma, risk_free_rate)
+
+    # 2. P2: Temkinli Büyüme (Hedef Getiri: Min Vol ile Max Sharpe arası)
+    target_r2 = (r_min + r_sh) / 2.0
+    c2 = (
+        sum_constraint,
+        {"type": "eq", "fun": lambda w, t=target_r2: np.dot(w, mu) - t},
+    )
+    res_p2 = minimize(min_vol_obj, (w_min + w_sh) / 2.0, method="SLSQP", bounds=bounds, constraints=c2)
+    w_p2 = np.clip(res_p2.x if res_p2.success else (w_min + w_sh) / 2.0, 0, max_weight)
+    w_p2 /= np.sum(w_p2)
+    r_p2, v_p2, s_p2 = portfolio_performance(w_p2, mu, sigma, risk_free_rate)
+
+    # 4. P4: Dinamik Büyüme (Hedef Getiri: Max Sharpe ile Max Getiri arası)
+    target_r4 = (r_sh + r_max) / 2.0
+    c4 = (
+        sum_constraint,
+        {"type": "eq", "fun": lambda w, t=target_r4: np.dot(w, mu) - t},
+    )
+    res_p4 = minimize(min_vol_obj, (w_sh + w_max_ret) / 2.0, method="SLSQP", bounds=bounds, constraints=c4)
+    w_p4 = np.clip(res_p4.x if res_p4.success else (w_sh + w_max_ret) / 2.0, 0, max_weight)
+    w_p4 /= np.sum(w_p4)
+    r_p4, v_p4, s_p4 = portfolio_performance(w_p4, mu, sigma, risk_free_rate)
+
+    portfolios = [
+        {
+            "id": "P1",
+            "name": "P1: Çok Düşük Risk (Defansif)",
+            "short_name": "P1: Defansif",
+            "tag": "🛡️ En Güvenli Liman",
+            "color": "#06B6D4",
+            "symbol": "diamond",
+            "return": r_min,
+            "volatility": v_min,
+            "sharpe": s_min,
+            "weights": pd.Series(w_min, index=symbols),
+            "description": "Portföy dalgalanmasını minimuma indiren, sermayeyi korumayı hedefleyen defansif sepet.",
+        },
+        {
+            "id": "P2",
+            "name": "P2: Temkinli Büyüme",
+            "short_name": "P2: Temkinli",
+            "tag": "🌱 Düşük-Orta Risk",
+            "color": "#14B8A6",
+            "symbol": "hexagon",
+            "return": r_p2,
+            "volatility": v_p2,
+            "sharpe": s_p2,
+            "weights": pd.Series(w_p2, index=symbols),
+            "description": "Düşük risk seviyesini korurken düzenli getiri artışı hedefleyen muhafazakar büyüme sepeti.",
+        },
+        {
+            "id": "P3",
+            "name": "P3: Optimal Denge (Maksimum Sharpe)",
+            "short_name": "P3: Max Sharpe",
+            "tag": "⭐ Matematiksel Zirve (Teğet)",
+            "color": "#10B981",
+            "symbol": "star",
+            "return": r_sh,
+            "volatility": v_sh,
+            "sharpe": s_sh,
+            "weights": pd.Series(w_sh, index=symbols),
+            "description": "Risk başına en yüksek birim getiriyi sunan, piyasadaki en akılcı ve dengeli portföy.",
+        },
+        {
+            "id": "P4",
+            "name": "P4: Dinamik Büyüme",
+            "short_name": "P4: Büyüme",
+            "tag": "🚀 Yüksek Getiri Potansiyeli",
+            "color": "#F59E0B",
+            "symbol": "cross",
+            "return": r_p4,
+            "volatility": v_p4,
+            "sharpe": s_p4,
+            "weights": pd.Series(w_p4, index=symbols),
+            "description": "Bir miktar daha fazla riski göze alarak getirisini teğet portföyün üzerine çıkarmak isteyenler için.",
+        },
+        {
+            "id": "P5",
+            "name": "P5: Agresif (Maksimum Getiri)",
+            "short_name": "P5: Agresif",
+            "tag": "🔥 Maksimum Kazanç Odaklı",
+            "color": "#EF4444",
+            "symbol": "triangle-up",
+            "return": r_max,
+            "volatility": v_max,
+            "sharpe": s_max,
+            "weights": pd.Series(w_max_ret, index=symbols),
+            "description": "Risk kısıtı gözetmeksizin seçilen hisseler içinde en yüksek getiriyi hedefleyen agresif sepet.",
+        },
+    ]
+    return portfolios

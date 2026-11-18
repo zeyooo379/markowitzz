@@ -1,5 +1,5 @@
 """
-3_🧠_Markowitz_Optimizasyon: Portföy Ağırlıkları, Etkin Sınır, Kullanıcı Özel Paneli ve İnteraktif Simülasyon
+3_🧠_Markowitz_Optimizasyon: Etkin Sınır Üzerinde 5 Stratejik Portföy ve Özel Portföy Paneli
 """
 
 import numpy as np
@@ -12,13 +12,14 @@ from utils.constants import BIST_HISSELER, RENKLER
 from utils.portfolio_engine import (
     calculate_returns,
     generate_efficient_frontier,
+    get_five_frontier_portfolios,
     get_market_parameters,
     optimize_markowitz,
     portfolio_performance,
 )
 
 st.set_page_config(
-    page_title="Markowitz Optimizasyonu & Özel Portföy Paneli — Markowitzz",
+    page_title="Markowitz Optimizasyonu & 5 Etkin Portföy — Markowitzz",
     page_icon="🧠",
     layout="wide",
 )
@@ -32,6 +33,14 @@ st.markdown("""
         border-radius: 14px;
         padding: 22px;
         margin-bottom: 25px;
+    }
+    .strategy-card {
+        background: #1E293B;
+        border-radius: 12px;
+        padding: 16px;
+        border: 1px solid #334155;
+        height: 100%;
+        text-align: center;
     }
     .guide-card {
         background: #1E293B;
@@ -54,20 +63,13 @@ st.markdown("""
         border-left: 4px solid #F59E0B;
         margin-bottom: 15px;
     }
-    .user-metric {
-        background: rgba(15, 23, 42, 0.8);
-        border: 1px solid #F43F5E;
-        border-radius: 10px;
-        padding: 12px;
-        text-align: center;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🧠 Markowitz Portföy Optimizasyonu & Özel Portföy Paneli")
+st.title("🧠 Markowitz Optimizasyonu: Etkin Sınır Üzerinde 5 Stratejik Portföy")
 st.markdown("""
-Markowitz Modern Portföy Teorisi ile en ideal portföyleri hesaplayın, 
-**kendi belirlediğiniz veya rastgele ürettiğiniz hisse ağırlıklarını test edin** ve sonucunuzun **Etkin Sınır (Efficient Frontier)** üzerindeki yerini anlık olarak görün!
+Markowitz Etkin Sınırı (mavi eğri) üzerindeki **en düşük riskten en yüksek getiriye kadar uzanan 5 ideal portföy dağılımını** inceleyin. 
+Ayrıca kendi belirlediğiniz özel portföyün bu 5 stratejiye göre nerede durduğunu canlı olarak test edin!
 """)
 
 prices = st.session_state.get("prices")
@@ -126,41 +128,62 @@ cov_matrix = market_params["covariance_matrix"]
 scaled_rf = market_params["risk_free_rate"]
 scale_title = f"{actual_days} İşlem Günü (Dönemsel)" if mode_code == "period" else "Yıllıklaştırılmış (252 Gün)"
 
-# Optimizasyonu Çalıştır
-opt_results = optimize_markowitz(
+# 5 Stratejik Portföyü Hesapla (Doğrudan Etkin Sınır Üzerinde)
+five_portfolios = get_five_frontier_portfolios(
     expected_returns=expected_returns,
     cov_matrix=cov_matrix,
     risk_free_rate=scaled_rf,
     max_weight=max_weight,
 )
 
-min_vol = opt_results["min_volatility"]
-max_sh = opt_results["max_sharpe"]
-eq_w = opt_results["equal_weight"]
+# Benchmark: Eşit Ağırlıklı Portföy
+eq_weights = np.array([1.0 / n_assets] * n_assets)
+eq_ret, eq_vol, eq_sharpe = portfolio_performance(eq_weights, expected_returns.values, cov_matrix.values, scaled_rf)
 
 # =============================================================================
-# 1. 🛠️ KULLANICIYA ÖZEL PORTFÖY SİMÜLATÖRÜ & AĞIRLIK GİRİŞ PANELİ
+# 1. 🎯 ETKİN SINIR ÜZERİNDEKİ 5 STRATEJİK PORTFÖY ÖZETİ
+# =============================================================================
+st.subheader("🎯 Etkin Sınır Üzerinde 5 Stratejik Portföy")
+st.markdown("""
+Aşağıdaki 5 portföy, risk toleransınıza göre doğrudan **Etkin Sınır (mavi eğri)** üzerinden seçilmiş en ideal matematiksel noktalardır:
+""")
+
+cols_5 = st.columns(5)
+for idx, p in enumerate(five_portfolios):
+    with cols_5[idx]:
+        st.markdown(f"""
+        <div class="strategy-card" style="border-top: 4px solid {p['color']};">
+            <h4 style="color: {p['color']}; margin-bottom: 2px;">{p['id']}</h4>
+            <div style="font-size: 0.8rem; font-weight: 600; color: #CBD5E1; margin-bottom: 8px;">{p['tag']}</div>
+            <div style="font-size: 0.78rem; color: #94A3B8; min-height: 40px; margin-bottom: 12px;">{p['description']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.metric(f"Getiri ({scale_title})", f"%{p['return'] * 100:.2f}")
+        st.metric("Risk (Volatilite)", f"%{p['volatility'] * 100:.2f}")
+        st.metric("Sharpe Oranı", f"{p['sharpe']:.3f}")
+
+st.markdown("---")
+
+# =============================================================================
+# 2. 🛠️ KULLANICIYA ÖZEL PORTFÖY PANELİ
 # =============================================================================
 st.markdown('<div class="user-panel">', unsafe_allow_html=True)
 st.markdown("""
 <h3 style="color: #F43F5E; margin-bottom: 5px;">🛠️ Kullanıcıya Özel Portföy Paneli</h3>
 <p style="color: #CBD5E1; font-size: 0.95rem; margin-bottom: 15px;">
-    Bu panelden çektiğiniz hisselere <b>kendi istediğiniz ağırlıkları girebilir</b> veya <b>rastgele ağırlıklar üreterek</b> 
-    portföyünüzün getiri/risk noktasını aşağıdaki Etkin Sınır grafiğinde anlık olarak izleyebilirsiniz.
+    Hisselere <b>kendi istediğiniz ağırlıkları verin</b> veya <b>rastgele dağıtın</b>. 
+    Portföyünüzün bu 5 stratejiye ve Etkin Sınır'a göre yerini aşağıdaki grafikte <b>pembe nokta (📍)</b> olarak izleyin!
 </p>
 """, unsafe_allow_html=True)
 
-# Session State Ağırlık Başlatma
 if "custom_weights" not in st.session_state or len(st.session_state["custom_weights"]) != n_assets:
     eq_val = round(100.0 / n_assets, 1)
     st.session_state["custom_weights"] = {s: eq_val for s in symbols}
 
-# Hızlı Butonlar
 btn_c1, btn_c2, btn_c3, btn_space = st.columns([1.5, 1.5, 1.5, 3])
 
 with btn_c1:
     if st.button("🎲 Rastgele Ağırlık Üret", use_container_width=True):
-        # Rastgele Dirichlet dağılımı (toplam 100)
         rand_weights = np.random.dirichlet(np.ones(n_assets)) * 100.0
         st.session_state["custom_weights"] = {
             s: round(float(w), 1) for s, w in zip(symbols, rand_weights)
@@ -183,9 +206,8 @@ with btn_c3:
             }
             st.rerun()
 
-st.markdown("##### ✏️ Hisse Ağırlıklarını Ayarlayın (%):")
+st.markdown("##### ✏️ Hisse Ağırlıklarını Belirleyin (%):")
 
-# Hisse Ağırlık Slider'ları (Grid)
 num_cols = min(4, max(2, n_assets))
 cols = st.columns(num_cols)
 
@@ -201,7 +223,6 @@ for idx, sym in enumerate(symbols):
         )
         st.session_state["custom_weights"][sym] = val
 
-# Toplam Ağırlık ve Normalizasyon
 total_user_weight = sum(st.session_state["custom_weights"].values())
 if total_user_weight > 0:
     normalized_user_w = np.array([
@@ -210,7 +231,6 @@ if total_user_weight > 0:
 else:
     normalized_user_w = np.array([1.0 / n_assets] * n_assets)
 
-# Kullanıcı Portföy Performansını Hesapla
 user_ret, user_vol, user_sharpe = portfolio_performance(
     normalized_user_w,
     expected_returns.values,
@@ -218,144 +238,32 @@ user_ret, user_vol, user_sharpe = portfolio_performance(
     scaled_rf,
 )
 
-# Kullanıcı Portföyü Gösterge Kartları
-st.markdown("---")
 u_col1, u_col2, u_col3, u_col4 = st.columns(4)
-
-with u_col1:
-    st.metric(
-        "Girdiğiniz Toplam Ağırlık",
-        f"%{total_user_weight:.1f}",
-        delta="Dengeli (%100)" if abs(total_user_weight - 100) < 0.5 else f"%{total_user_weight - 100:+.1f} (Normalize edildi)",
-        delta_color="normal" if abs(total_user_weight - 100) < 0.5 else "off",
-    )
-
-with u_col2:
-    st.metric(
-        f"Sizin Portföy Getiriniz ({scale_title})",
-        f"%{user_ret * 100:.2f}",
-        delta=f"%{(user_ret - eq_w['return']) * 100:+.2f} (Eşit Ağ. Kıyas)",
-    )
-
-with u_col3:
-    st.metric(
-        "Sizin Portföy Riskiniz (Volatilite)",
-        f"%{user_vol * 100:.2f}",
-        delta=f"%{(user_vol - min_vol['volatility']) * 100:+.2f} (Min Riski Fark)",
-        delta_color="inverse",
-    )
-
-with u_col4:
-    st.metric(
-        "Sizin Sharpe Oranınız",
-        f"{user_sharpe:.3f}",
-        delta=f"{user_sharpe - max_sh['sharpe']:+.3f} (Max Sharpe Kıyas)",
-    )
+u_col1.metric(
+    "Girdiğiniz Toplam Ağırlık",
+    f"%{total_user_weight:.1f}",
+    delta="Dengeli (%100)" if abs(total_user_weight - 100) < 0.5 else f"%{total_user_weight - 100:+.1f} (Normalize edildi)",
+    delta_color="normal" if abs(total_user_weight - 100) < 0.5 else "off",
+)
+u_col2.metric(f"Sizin Portföy Getiriniz ({scale_title})", f"%{user_ret * 100:.2f}")
+u_col3.metric("Sizin Portföy Riskiniz (Volatilite)", f"%{user_vol * 100:.2f}")
+u_col4.metric("Sizin Sharpe Oranınız", f"{user_sharpe:.3f}")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
 # =============================================================================
-# 2. TEMEL STRATEJİLER VE DAĞILIMLAR
+# 3. ETKİN SINIR GRAFİĞİ (5 PORTFÖY + KULLANICI PORTFÖYÜ)
 # =============================================================================
-st.subheader("🏆 Karşılaştırmalı Stratejiler")
+st.subheader("📈 Etkin Sınır Grafiği & 5 Portföyün Konumu")
+st.caption("Aşağıdaki grafikte mavi çizgi üzerindeki 5 renkli nokta (P1 - P5) stratejik portföyleri, pembe nokta (📍) ise sizin özel portföyünüzü gösterir.")
 
-c1, c2, c3 = st.columns(3)
-
-with c1:
-    st.markdown("""
-    <div class="guide-card-green">
-        <h4 style="color: #10B981; margin-bottom: 5px;">🥇 Maksimum Sharpe Portföyü</h4>
-        <p style="color: #94A3B8; font-size: 0.85rem; margin-bottom: 5px;">Risk başına en yüksek getiriyi sunan en akılcı ve dengeli portföy.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    st.metric(f"Beklenen Getiri ({scale_title})", f"%{max_sh['return'] * 100:.2f}")
-    st.metric("Volatilite (Risk)", f"%{max_sh['volatility'] * 100:.2f}")
-    st.metric("Sharpe Oranı", f"{max_sh['sharpe']:.3f}")
-
-with c2:
-    st.markdown("""
-    <div class="guide-card">
-        <h4 style="color: #38BDF8; margin-bottom: 5px;">🛡️ Minimum Volatilite Portföyü</h4>
-        <p style="color: #94A3B8; font-size: 0.85rem; margin-bottom: 5px;">"Geceleri rahat uyumak istiyorum" diyenler için dalgalanması en düşük sepet.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    st.metric(f"Beklenen Getiri ({scale_title})", f"%{min_vol['return'] * 100:.2f}")
-    st.metric("Volatilite (Risk)", f"%{min_vol['volatility'] * 100:.2f}")
-    st.metric("Sharpe Oranı", f"{min_vol['sharpe']:.3f}")
-
-with c3:
-    st.markdown("""
-    <div class="guide-card-orange">
-        <h4 style="color: #F59E0B; margin-bottom: 5px;">⚖️ Eşit Ağırlıklı Portföy (1/N)</h4>
-        <p style="color: #94A3B8; font-size: 0.85rem; margin-bottom: 5px;">"Hiç analiz yapmayıp her hisseye eşit pay verseydim ne olurdu?" kıyası.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    st.metric(f"Beklenen Getiri ({scale_title})", f"%{eq_w['return'] * 100:.2f}")
-    st.metric("Volatilite (Risk)", f"%{eq_w['volatility'] * 100:.2f}")
-    st.metric("Sharpe Oranı", f"{eq_w['sharpe']:.3f}")
-
-# Dağılım Tablosu
-weights_df = pd.DataFrame({
-    "Sembol": symbols,
-    "Şirket": [BIST_HISSELER.get(s, s) for s in symbols],
-    "Sizin Portföyünüz (%)": (normalized_user_w * 100).round(2),
-    "Max Sharpe Ağırlık (%)": (max_sh["weights"] * 100).round(2).values,
-    "Min Volatilite Ağırlık (%)": (min_vol["weights"] * 100).round(2).values,
-    "Eşit Ağırlık (%)": (eq_w["weights"] * 100).round(2).values,
-})
-
-with st.expander("📋 Tüm Portföy Dağılımlarını Tablo Olarak Gör", expanded=False):
-    st.dataframe(weights_df, use_container_width=True, hide_index=True)
-
-st.markdown("---")
-
-# =============================================================================
-# 3. ETKİN SINIR (EFFICIENT FRONTIER) & KULLANICI PORTFÖYÜ GRAFİĞİ
-# =============================================================================
-st.subheader("📈 Etkin Sınır Üzerinde Portföyünüzün Yeri")
-st.caption(f"Aşağıdaki grafikte pembe renkle gösterilen nokta (📍), yukarıda oluşturduğunuz **Sizin Portföyünüzdür**.")
-
-# 3 Adımda Anlaşılır Kılavuz
-g1, g2, g3 = st.columns(3)
-
-with g1:
-    st.markdown("""
-    <div class="guide-card">
-        <h5 style="color: #38BDF8;">🧭 1. Hedef: Kuzeybatı</h5>
-        <p style="color: #CBD5E1; font-size: 0.85rem;">
-            Daha çok getiri (yukarı) ve daha az risk (sola). Portföyünüz ne kadar sol-üstteyse o kadar başarılıdır.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with g2:
-    st.markdown("""
-    <div class="guide-card-green">
-        <h5 style="color: #10B981;">🚀 2. Mavi Eğri: Matematiksel Zirve</h5>
-        <p style="color: #CBD5E1; font-size: 0.85rem;">
-            Mavi çizgi, mevcut hisselerle ulaşılabilecek <b>en mükemmel sınırdır</b>.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with g3:
-    st.markdown("""
-    <div class="guide-card-orange">
-        <h5 style="color: #F59E0B;">📍 3. Sizin Noktanız Nerede?</h5>
-        <p style="color: #CBD5E1; font-size: 0.85rem;">
-            Eğer noktanız mavi çizgiye çok yakınsa sepetiniz verimlidir; altındaysa aynı riske daha çok getiri alabilirsiniz!
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-# Etkin Sınır Verisi Hesapla
-with st.spinner("Etkin Sınır eğrisi hesaplanıyor..."):
+with st.spinner("Etkin Sınır eğrisi ve noktalar hesaplanıyor..."):
     frontier_df = generate_efficient_frontier(
         expected_returns=expected_returns,
         cov_matrix=cov_matrix,
         risk_free_rate=scaled_rf,
         max_weight=max_weight,
-        points=50,
+        points=60,
     )
 
 fig_ef = go.Figure()
@@ -366,10 +274,10 @@ if not frontier_df.empty:
         x=frontier_df["Volatilite"] * 100,
         y=frontier_df["Beklenen Getiri"] * 100,
         mode="lines",
-        name="Etkin Sınır (Mümkün Olan En İyi Portföyler)",
+        name="Etkin Sınır (Mavi Eğri)",
         line=dict(color="#38BDF8", width=3.5),
         customdata=frontier_df["Sharpe"],
-        hovertemplate="<b>Etkin Sınır Portföyü</b><br>Risk (Volatilite): %{x:.2f}%<br>Beklenen Getiri: %{y:.2f}%<br>Sharpe: %{customdata:.2f}<extra></extra>",
+        hovertemplate="<b>Etkin Sınır Noktası</b><br>Risk: %{x:.2f}%<br>Getiri: %{y:.2f}%<br>Sharpe: %{customdata:.2f}<extra></extra>",
     ))
 
 # 2. Tekil Hisseler
@@ -384,54 +292,41 @@ fig_ef.add_trace(go.Scatter(
     text=single_vols.index,
     textposition="top center",
     name="Tekil Hisseler",
-    marker=dict(size=10, color="#F59E0B", symbol="circle", line=dict(color="#FFFFFF", width=1)),
+    marker=dict(size=9, color="#94A3B8", symbol="circle", opacity=0.7),
     customdata=single_sharpes.values,
-    hovertemplate="<b>Hisse: %{text}</b><br>Risk (Volatilite): %{x:.2f}%<br>Beklenen Getiri: %{y:.2f}%<br>Sharpe: %{customdata:.2f}<extra></extra>",
+    hovertemplate="<b>Hisse: %{text}</b><br>Risk: %{x:.2f}%<br>Getiri: %{y:.2f}%<br>Sharpe: %{customdata:.2f}<extra></extra>",
 ))
 
-# 3. Maksimum Sharpe Noktası (Yeşil Yıldız)
-fig_ef.add_trace(go.Scatter(
-    x=[max_sh["volatility"] * 100],
-    y=[max_sh["return"] * 100],
-    mode="markers+text",
-    text=["⭐ Max Sharpe"],
-    textposition="bottom right",
-    name="Max Sharpe (En Dengeli)",
-    marker=dict(size=18, color="#10B981", symbol="star", line=dict(color="#FFFFFF", width=1.5)),
-    hovertemplate="<b>Maksimum Sharpe Portföyü</b><br>Risk: %{x:.2f}%<br>Getiri: %{y:.2f}%<br>Sharpe: " + f"{max_sh['sharpe']:.2f}<extra></extra>",
-))
+# 3. ETKİN SINIR ÜZERİNDEKİ 5 STRATEJİK PORTFÖYÜ ÇİZ
+for p in five_portfolios:
+    fig_ef.add_trace(go.Scatter(
+        x=[p["volatility"] * 100],
+        y=[p["return"] * 100],
+        mode="markers+text",
+        text=[f"<b>{p['id']}</b>"],
+        textposition="top right",
+        name=p["name"],
+        marker=dict(
+            size=17,
+            color=p["color"],
+            symbol=p["symbol"],
+            line=dict(color="#FFFFFF", width=2),
+        ),
+        hovertemplate=(
+            f"<b>{p['name']}</b> ({p['tag']})<br>"
+            f"Risk (Volatilite): %{p['volatility'] * 100:.2f}%<br>"
+            f"Beklenen Getiri: %{p['return'] * 100:.2f}%<br>"
+            f"Sharpe Oranı: {p['sharpe']:.3f}<extra></extra>"
+        ),
+    ))
 
-# 4. Minimum Volatilite Noktası (Kırmızı Elmas)
-fig_ef.add_trace(go.Scatter(
-    x=[min_vol["volatility"] * 100],
-    y=[min_vol["return"] * 100],
-    mode="markers+text",
-    text=["🛡️ Min Volatilite"],
-    textposition="top left",
-    name="Min Volatilite (En Güvenli)",
-    marker=dict(size=15, color="#EF4444", symbol="diamond", line=dict(color="#FFFFFF", width=1.5)),
-    hovertemplate="<b>Minimum Volatilite Portföyü</b><br>Risk: %{x:.2f}%<br>Getiri: %{y:.2f}%<br>Sharpe: " + f"{min_vol['sharpe']:.2f}<extra></extra>",
-))
-
-# 5. Eşit Ağırlıklı Nokta (Mor Kare)
-fig_ef.add_trace(go.Scatter(
-    x=[eq_w["volatility"] * 100],
-    y=[eq_w["return"] * 100],
-    mode="markers+text",
-    text=["⚖️ Eşit Dağılım"],
-    textposition="bottom left",
-    name="Eşit Dağılım (1/N)",
-    marker=dict(size=13, color="#A855F7", symbol="square", line=dict(color="#FFFFFF", width=1)),
-    hovertemplate="<b>Eşit Ağırlıklı Portföy</b><br>Risk: %{x:.2f}%<br>Getiri: %{y:.2f}%<extra></extra>",
-))
-
-# 6. 📍 KULLANICI PORTFÖYÜ (ÖZEL VURGULU PEMBE NOKTA)
+# 4. KULLANICI PORTFÖYÜ (📍 PEMBE NOKTA)
 fig_ef.add_trace(go.Scatter(
     x=[user_vol * 100],
     y=[user_ret * 100],
     mode="markers+text",
     text=["📍 SİZİN PORTFÖYÜNÜZ"],
-    textposition="top center",
+    textposition="bottom center",
     name="Sizin Portföyünüz",
     marker=dict(
         size=22,
@@ -447,25 +342,9 @@ fig_ef.add_trace(go.Scatter(
     ),
 ))
 
-# Kullanıcının Noktasını İşaretleyen Ok
-fig_ef.add_annotation(
-    x=user_vol * 100,
-    y=user_ret * 100,
-    text="Sizin Portföyünüz Burada!",
-    showarrow=True,
-    arrowhead=2,
-    arrowsize=1.2,
-    arrowcolor="#F43F5E",
-    ax=-70,
-    ay=-50,
-    bgcolor="#1E293B",
-    bordercolor="#F43F5E",
-    font=dict(color="#F8FAFC", size=11, family="sans-serif"),
-)
-
 fig_ef.update_layout(
     template="plotly_dark",
-    xaxis_title=f"Volatilite / Risk (Standart Sapma) (%) — [{scale_title}]",
+    xaxis_title=f"Volatilite / Risk (%) — [{scale_title}]",
     yaxis_title=f"Beklenen Getiri (%) — [{scale_title}]",
     hovermode="closest",
     height=600,
@@ -475,46 +354,52 @@ fig_ef.update_layout(
 
 st.plotly_chart(fig_ef, use_container_width=True)
 
-# Portföy Verimlilik Teşhisi
-if not frontier_df.empty:
-    # Kullanıcının riskiyle aynı veya en yakın etkin sınır getirisini bul
-    idx_close_vol = (frontier_df["Volatilite"] - user_vol).abs().idxmin()
-    best_ret_at_user_vol = frontier_df.loc[idx_close_vol, "Beklenen Getiri"]
-    ret_gap = (best_ret_at_user_vol - user_ret) * 100
-
-    if ret_gap <= 0.3:
-        st.success(f"🎉 **Tebrikler!** Girdiğiniz portföy dağılımı Etkin Sınır'a neredeyse teğet (Getiri kaybı: sadece %{max(0.0, ret_gap):.2f}). Çok başarılı ve verimli bir sepet kurdunuz!")
-    else:
-        st.warning(f"💡 **Verimlilik Fırsatı:** Portföyünüz şu an Etkin Sınır'ın altında kalıyor. **Aynı risk seviyesinde (%{user_vol * 100:.2f})** kalarak Markowitz dağılımıyla **%{ret_gap:+.2f} daha fazla getiri** elde edebilirsiniz!")
-
 st.markdown("---")
 
 # =============================================================================
-# 4. 🎯 RİSK KAYDIRMA ÇUBUĞU (ALTERNATİF ETKİN NOKTALAR)
+# 4. 5 PORTFÖYÜN HİSSE DAĞILIMLARI KARŞILAŞTIRMA TABLOSU & GRAFİĞİ
 # =============================================================================
-with st.expander("🔍 Risk Seviyesine Göre Alternatif Optimal Noktaları Keşfet"):
-    min_available_vol = float(frontier_df["Volatilite"].min() * 100)
-    max_available_vol = float(frontier_df["Volatilite"].max() * 100)
-    
-    user_target_vol = st.slider(
-        f"İncelemek İstediğiniz Risk Seviyesi (%) [{scale_title}]:",
-        min_value=round(min_available_vol, 2),
-        max_value=round(max_available_vol, 2),
-        value=round(max_sh["volatility"] * 100, 2),
-        step=0.25,
-    )
+st.subheader("📊 5 Portföyün Hisse Dağılım Tablosu & Karşılaştırması")
 
-    idx_closest = (frontier_df["Volatilite"] * 100 - user_target_vol).abs().idxmin()
-    matched_row = frontier_df.loc[idx_closest]
-    matched_weights = matched_row["Ağırlıklar"]
+# Karşılaştırma DataFrame'i
+comp_dict = {
+    "Sembol": symbols,
+    "Şirket": [BIST_HISSELER.get(s, s) for s in symbols],
+}
+for p in five_portfolios:
+    comp_dict[f"{p['id']} ({p['short_name'].split(':')[1].strip()}) (%)"] = (p["weights"] * 100).round(2).values
 
-    st.markdown(f"**Hedeflenen Risk:** %{matched_row['Volatilite'] * 100:.2f} | **Optimal Getiri:** %{matched_row['Beklenen Getiri'] * 100:.2f} | **Sharpe:** {matched_row['Sharpe']:.3f}")
-    
-    df_opt_bar = pd.DataFrame([
-        {"Sembol": s, "Önerilen Pay (%)": round(w * 100, 2)}
-        for s, w in matched_weights.items() if w > 0.005
-    ]).sort_values(by="Önerilen Pay (%)", ascending=False)
-    
-    st.dataframe(df_opt_bar, use_container_width=True, hide_index=True)
+comp_dict["Sizin Portföyünüz (%)"] = (normalized_user_w * 100).round(2)
+
+df_all_weights = pd.DataFrame(comp_dict)
+st.dataframe(df_all_weights, use_container_width=True, hide_index=True)
+
+# Gruplanmış Hisse Ağırlık Çubuk Grafiği
+st.markdown("##### 📈 Risk Seviyesi Arttıkça Hisse Ağırlıklarının Değişimi:")
+st.caption("P1'den P5'e doğru gidildikçe hisse dağılımlarının defansiften agresife nasıl evrildiğini inceleyin:")
+
+melted_weights = []
+for p in five_portfolios:
+    for sym, w in p["weights"].items():
+        if w > 0.005:
+            melted_weights.append({
+                "Portföy": p["short_name"],
+                "Hisse": sym,
+                "Ağırlık (%)": round(w * 100, 2),
+            })
+
+df_melted = pd.DataFrame(melted_weights)
+fig_grouped_bar = px.bar(
+    df_melted,
+    x="Portföy",
+    y="Ağırlık (%)",
+    color="Hisse",
+    title="Etkin Sınır Üzerindeki 5 Portföyün Hisse Kırılımı",
+    template="plotly_dark",
+    text="Ağırlık (%)",
+)
+fig_grouped_bar.update_traces(texttemplate="%{text:.0f}%", textposition="inside")
+fig_grouped_bar.update_layout(margin=dict(l=20, r=20, t=40, b=20), barmode="stack")
+st.plotly_chart(fig_grouped_bar, use_container_width=True)
 
 st.info("👉 Sol menüden **📈 4_Simulasyon_ve_CML** sayfasına giderek 2000+ portföylük Monte Carlo simülasyonunu ve Sermaye Pazarı Doğrusunu (CML) inceleyebilirsiniz.")
