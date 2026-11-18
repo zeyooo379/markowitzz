@@ -405,3 +405,133 @@ def get_five_frontier_portfolios(
         },
     ]
     return portfolios
+
+
+def get_ten_frontier_portfolios(
+    expected_returns: pd.Series,
+    cov_matrix: pd.DataFrame,
+    risk_free_rate: float = 0.0,
+    max_weight: float = 1.0,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Etkin Sınır (Efficient Frontier) üzerinde tam 10 stratejik portföy hesaplar:
+    - 5 Tanesi Maksimum Sharpe'ın Altında (Düşük Risk / Defansif Bölge: P1 - P5)
+    - 5 Tanesi Maksimum Sharpe'ın Üstünde (Yüksek Getiri / Dinamik Bölge: P6 - P10)
+    Ayrıca merkez referans olarak Maksimum Sharpe portföyünü de döndürür.
+    """
+    n_assets = len(expected_returns)
+    mu = expected_returns.values
+    sigma = cov_matrix.values
+    symbols = list(expected_returns.index)
+    bounds = tuple((0.0, max_weight) for _ in range(n_assets))
+    init_weights = np.array([1.0 / n_assets] * n_assets)
+    sum_constraint = {"type": "eq", "fun": lambda w: np.sum(w) - 1.0}
+
+    def min_vol_obj(w):
+        return np.sqrt(np.dot(w.T, np.dot(sigma, w)))
+
+    # 1. Min Volatility
+    res_min_vol = minimize(min_vol_obj, init_weights, method="SLSQP", bounds=bounds, constraints=sum_constraint)
+    w_min = np.clip(res_min_vol.x if res_min_vol.success else init_weights, 0, max_weight)
+    w_min /= np.sum(w_min)
+    r_min, v_min, s_min = portfolio_performance(w_min, mu, sigma, risk_free_rate)
+
+    # 2. Max Sharpe
+    def neg_sharpe_obj(w):
+        r, v, s = portfolio_performance(w, mu, sigma, risk_free_rate)
+        return -s
+    res_max_sh = minimize(neg_sharpe_obj, init_weights, method="SLSQP", bounds=bounds, constraints=sum_constraint)
+    w_sh = np.clip(res_max_sh.x if res_max_sh.success else init_weights, 0, max_weight)
+    w_sh /= np.sum(w_sh)
+    r_sh, v_sh, s_sh = portfolio_performance(w_sh, mu, sigma, risk_free_rate)
+
+    # 3. Max Return
+    def neg_ret_obj(w):
+        return -np.dot(w, mu)
+    res_max_ret = minimize(neg_ret_obj, init_weights, method="SLSQP", bounds=bounds, constraints=sum_constraint)
+    w_max = np.clip(res_max_ret.x if res_max_ret.success else init_weights, 0, max_weight)
+    w_max /= np.sum(w_max)
+    r_max, v_max, s_max = portfolio_performance(w_max, mu, sigma, risk_free_rate)
+
+    # Güvenlik kontrolü
+    if r_sh <= r_min:
+        r_sh = r_min + (r_max - r_min) * 0.4
+    if r_max <= r_sh:
+        r_max = r_sh * 1.2
+
+    # 5 Nokta Sharpe Altında (r_min'den r_sh'ye 5 eşit aralık)
+    targets_below = np.linspace(r_min, r_sh, 6)[:-1]  # 5 nokta
+    # 5 Nokta Sharpe Üstünde (r_sh'den r_max'a 5 eşit aralık)
+    targets_above = np.linspace(r_sh, r_max, 6)[1:]   # 5 nokta
+
+    below_names = [
+        ("P1", "P1: Min Volatilite (Çok Düşük Risk)", "🛡️ En Düşük Risk", "#06B6D4"),
+        ("P2", "P2: Defansif Artı", "🌱 Çok Temkinli", "#0EA5E9"),
+        ("P3", "P3: Muhafazakar Dengeli", "⚖️ Dengeli Muhafazakar", "#3B82F6"),
+        ("P4", "P4: Temkinli Büyüme", "📈 Düzenli Büyüme", "#6366F1"),
+        ("P5", "P5: Dengeli Adayı", "🎯 Sharpe'a Yakın Denge", "#8B5CF6"),
+    ]
+
+    above_names = [
+        ("P6", "P6: Dinamik Büyüme", "🚀 İleri Büyüme", "#EC4899"),
+        ("P7", "P7: Yüksek Getiri Odaklı", "⚡ Yüksek Potansiyel", "#F43F5E"),
+        ("P8", "P8: Atak Portföy", "🔥 Atak Büyüme", "#F97316"),
+        ("P9", "P9: Yüksek Risk / Getiri", "💥 Yüksek Riskli", "#EA580C"),
+        ("P10", "P10: Maksimum Getiri (Agresif)", "🏆 Zirve Kazanç", "#DC2626"),
+    ]
+
+    ten_portfolios = []
+
+    # Sharpe Altındaki 5 Portföyü Çöz
+    for (pid, pname, ptag, pcolor), target_r in zip(below_names, targets_below):
+        c = (sum_constraint, {"type": "eq", "fun": lambda w, t=target_r: np.dot(w, mu) - t})
+        res = minimize(min_vol_obj, init_weights, method="SLSQP", bounds=bounds, constraints=c)
+        w = np.clip(res.x if res.success else init_weights, 0, max_weight)
+        w /= np.sum(w)
+        ret, vol, sh = portfolio_performance(w, mu, sigma, risk_free_rate)
+        ten_portfolios.append({
+            "id": pid,
+            "name": pname,
+            "tag": ptag,
+            "group": "Düşük Risk Bölgesi (Sharpe Altı)",
+            "color": pcolor,
+            "symbol": "diamond",
+            "return": ret,
+            "volatility": vol,
+            "sharpe": sh,
+            "weights": pd.Series(w, index=symbols),
+        })
+
+    # Sharpe Üstündeki 5 Portföyü Çöz
+    for (pid, pname, ptag, pcolor), target_r in zip(above_names, targets_above):
+        c = (sum_constraint, {"type": "eq", "fun": lambda w, t=target_r: np.dot(w, mu) - t})
+        res = minimize(min_vol_obj, init_weights, method="SLSQP", bounds=bounds, constraints=c)
+        w = np.clip(res.x if res.success else init_weights, 0, max_weight)
+        w /= np.sum(w)
+        ret, vol, sh = portfolio_performance(w, mu, sigma, risk_free_rate)
+        ten_portfolios.append({
+            "id": pid,
+            "name": pname,
+            "tag": ptag,
+            "group": "Yüksek Getiri Bölgesi (Sharpe Üstü)",
+            "color": pcolor,
+            "symbol": "triangle-up",
+            "return": ret,
+            "volatility": vol,
+            "sharpe": sh,
+            "weights": pd.Series(w, index=symbols),
+        })
+
+    max_sharpe_info = {
+        "id": "MS",
+        "name": "Maksimum Sharpe (Teğet Noktası)",
+        "tag": "⭐ Referans Zirve",
+        "color": "#10B981",
+        "symbol": "star",
+        "return": r_sh,
+        "volatility": v_sh,
+        "sharpe": s_sh,
+        "weights": pd.Series(w_sh, index=symbols),
+    }
+
+    return ten_portfolios, max_sharpe_info
