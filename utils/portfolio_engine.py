@@ -183,13 +183,16 @@ def generate_efficient_frontier(
     max_weight: float = 1.0,
     points: int = 50,
 ) -> pd.DataFrame:
-    """Etkin Sınır (Efficient Frontier) eğrisi için noktaları hesaplar."""
+    """
+    Etkin Sınır (Efficient Frontier) eğrisi için noktaları ve 
+    her noktaya karşılık gelen optimal hisse ağırlıklarını hesaplar.
+    """
     n_assets = len(expected_returns)
     mu = expected_returns.values
     sigma = cov_matrix.values
+    symbols = list(expected_returns.index)
     bounds = tuple((0.0, max_weight) for _ in range(n_assets))
 
-    # Min volatilite ve max getiri aralığını bul
     min_ret = float(np.min(mu))
     max_ret = float(np.max(mu))
     target_returns = np.linspace(min_ret, max_ret, points)
@@ -197,6 +200,7 @@ def generate_efficient_frontier(
     frontier_returns = []
     frontier_volatilities = []
     frontier_sharpes = []
+    frontier_weights = []
 
     init_weights = np.array([1.0 / n_assets] * n_assets)
 
@@ -210,16 +214,19 @@ def generate_efficient_frontier(
 
         res = minimize(vol_obj, init_weights, method="SLSQP", bounds=bounds, constraints=constraints)
         if res.success:
-            w = res.x
+            w = np.clip(res.x, 0, max_weight)
+            w /= np.sum(w)
             ret, vol, sh = portfolio_performance(w, mu, sigma, risk_free_rate)
             frontier_returns.append(ret)
             frontier_volatilities.append(vol)
             frontier_sharpes.append(sh)
+            frontier_weights.append(dict(zip(symbols, w)))
 
     return pd.DataFrame({
         "Beklenen Getiri": frontier_returns,
         "Volatilite": frontier_volatilities,
         "Sharpe": frontier_sharpes,
+        "Ağırlıklar": frontier_weights,
     })
 
 
@@ -241,7 +248,6 @@ def simulate_monte_carlo(
     for i in range(num_portfolios):
         w = np.random.random(n_assets)
         w /= np.sum(w)
-        # Max weight filtresi (aşarsa yeniden ölçekle)
         if np.max(w) > max_weight:
             w = np.clip(w, 0, max_weight)
             w /= np.sum(w)
