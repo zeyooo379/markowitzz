@@ -267,7 +267,7 @@ with st.spinner("Etkin Sınır eğrisi hesaplanıyor..."):
         cov_matrix=cov_matrix,
         risk_free_rate=scaled_rf,
         max_weight=max_weight,
-        points=60,
+        points=100, include_portfolios=ten_portfolios + [max_sharpe_info],
     )
 
 fig_ef = go.Figure()
