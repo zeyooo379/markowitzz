@@ -1,7 +1,8 @@
 """
 Markowitz Portföy Optimizasyon Motoru
 Dönemsel (Kullanıcının seçtiği T gün) ve Yıllıklaştırılmış (252 gün) hesaplamaları destekler.
-Tam Parabol (Alt Kanat + Etkin Üst Kanat) ve 10 Stratejik Portföy (5 Sharpe Altı, 5 Sharpe Üstü).
+Tam Parabol (Alt Kanat + Etkin Üst Kanat), Min Volatilite Altındaki Portföyler (A1 - A4) 
+ve 10 Stratejik Portföy (P1 - P10).
 """
 
 from typing import Dict, Any, Tuple, List
@@ -219,12 +220,14 @@ def get_ten_frontier_portfolios(
     cov_matrix: pd.DataFrame,
     risk_free_rate: float = 0.0,
     max_weight: float = 1.0,
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], List[Dict[str, Any]]]:
     """
-    Etkin Sınır (Efficient Frontier) parabolü üzerinde tam 10 stratejik portföy hesaplar:
+    Etkin Sınır (Efficient Frontier) parabolü üzerinde:
+    - 4 Tanesi Minimum Volatilitenin Altında (Alt Kanat / Verimsiz Bölge: A1 - A4)
     - 5 Tanesi Maksimum Sharpe'ın Altında (P1 - P5)
+    - 1 Tanesi Maksimum Sharpe (Teğet Noktası / ⭐)
     - 5 Tanesi Maksimum Sharpe'ın Üstünde (P6 - P10)
-    Tüm portföyler (P6, P7, P8 dahil) parabol çizgisinin birebir üstünde oturur.
+    Tüm portföyler parabol çizgisinin birebir üstünde oturur.
     """
     n_assets = len(expected_returns)
     mu = expected_returns.values
@@ -243,7 +246,16 @@ def get_ten_frontier_portfolios(
     w_min /= np.sum(w_min)
     r_min, v_min, s_min = portfolio_performance(w_min, mu, sigma, risk_free_rate)
 
-    # 2. Kısıtlar altında Maksimum Mümkün Getiri (P10 / tepe noktası)
+    # 2. Kısıtlar altında En Düşük Getiri (Alt kanadın en dibi)
+    def pos_ret_obj(w):
+        return np.dot(w, mu)
+
+    res_lowest = minimize(pos_ret_obj, init_weights, method="SLSQP", bounds=bounds, constraints=sum_c)
+    w_lowest = np.clip(res_lowest.x if res_lowest.success else init_weights, 0, max_weight)
+    w_lowest /= np.sum(w_lowest)
+    r_lowest = float(np.dot(w_lowest, mu))
+
+    # 3. Kısıtlar altında Maksimum Mümkün Getiri (P10 / tepe noktası)
     def neg_ret_obj(w):
         return -np.dot(w, mu)
 
@@ -252,7 +264,7 @@ def get_ten_frontier_portfolios(
     w_max /= np.sum(w_max)
     r_max, v_max, s_max = portfolio_performance(w_max, mu, sigma, risk_free_rate)
 
-    # 3. Maksimum Sharpe (Teğet Noktası)
+    # 4. Maksimum Sharpe (Teğet Noktası)
     def neg_sharpe_obj(w):
         r, v, s = portfolio_performance(w, mu, sigma, risk_free_rate)
         return -s
@@ -263,14 +275,46 @@ def get_ten_frontier_portfolios(
     r_sh, v_sh, s_sh = portfolio_performance(w_sh, mu, sigma, risk_free_rate)
 
     # Tutarlılık kontrolü
+    if r_lowest >= r_min:
+        r_lowest = r_min - 0.05
     if r_sh <= r_min:
         r_sh = r_min + (r_max - r_min) * 0.4
     if r_max <= r_sh + 1e-4:
         r_max = r_sh + 0.01
 
-    # 5 Nokta Sharpe Altında (r_min'den r_sh'ye 5 nokta)
+    # =========================================================================
+    # A) MİNİMUM VOLATİLİTE ALTINDAKİ PORTFÖYLER (A1 - A4)
+    # =========================================================================
+    targets_lower = list(np.linspace(r_lowest, r_min, 5)[:-1])
+    lower_names = [
+        ("A1", "A1: Alt Kanat - En Düşük Getirili Uç", "⚠️ En Düşük Getiri", "#64748B"),
+        ("A2", "A2: Alt Kanat - Yüksek Risk / Düşük Getiri", "⚠️ Verimsiz Bölge", "#78716C"),
+        ("A3", "A3: Alt Kanat - Ara Düşük Getiri", "⚠️ Verimsiz Bölge", "#94A3B8"),
+        ("A4", "A4: Alt Kanat - Min Vol Altı", "⚠️ P1'in Hemen Altı", "#A1A1AA"),
+    ]
+
+    lower_portfolios = []
+    curr_w = w_lowest
+    for (pid, pname, ptag, pcolor), t_r in zip(lower_names, targets_lower):
+        w_p, ret_p, vol_p, sh_p = _solve_frontier_point(t_r, curr_w, mu, sigma, bounds, max_weight, risk_free_rate)
+        curr_w = w_p
+        lower_portfolios.append({
+            "id": pid,
+            "name": pname,
+            "tag": ptag,
+            "group": "Min Volatilite Altı (Alt Kanat / Verimsiz)",
+            "color": pcolor,
+            "symbol": "circle-open",
+            "return": ret_p,
+            "volatility": vol_p,
+            "sharpe": sh_p,
+            "weights": pd.Series(w_p, index=symbols),
+        })
+
+    # =========================================================================
+    # B) ETKİN ÜST KANAT: 10 STRATEJİK PORTFÖY (P1 - P10)
+    # =========================================================================
     targets_below = list(np.linspace(r_min, r_sh, 6)[:-1])
-    # 5 Nokta Sharpe Üstünde (r_sh'den r_max'a 5 nokta)
     targets_above = list(np.linspace(r_sh, r_max, 6)[1:])
 
     below_names = [
@@ -291,7 +335,7 @@ def get_ten_frontier_portfolios(
 
     ten_portfolios = []
 
-    # Sharpe Altı Portföyler (Warm-start ile çöz)
+    # Sharpe Altı Portföyler (P1 - P5)
     curr_w = w_min
     for (pid, pname, ptag, pcolor), t_r in zip(below_names, targets_below):
         w_p, ret_p, vol_p, sh_p = _solve_frontier_point(t_r, curr_w, mu, sigma, bounds, max_weight, risk_free_rate)
@@ -309,7 +353,7 @@ def get_ten_frontier_portfolios(
             "weights": pd.Series(w_p, index=symbols),
         })
 
-    # Sharpe Üstü Portföyler (Warm-start ile çöz)
+    # Sharpe Üstü Portföyler (P6 - P10)
     curr_w = w_sh
     for (pid, pname, ptag, pcolor), t_r in zip(above_names, targets_above):
         w_p, ret_p, vol_p, sh_p = _solve_frontier_point(t_r, curr_w, mu, sigma, bounds, max_weight, risk_free_rate)
@@ -339,7 +383,7 @@ def get_ten_frontier_portfolios(
         "weights": pd.Series(w_sh, index=symbols),
     }
 
-    return ten_portfolios, max_sharpe_info
+    return ten_portfolios, max_sharpe_info, lower_portfolios
 
 
 def generate_efficient_frontier(
@@ -351,10 +395,8 @@ def generate_efficient_frontier(
     include_portfolios: List[Dict[str, Any]] = None,
 ) -> pd.DataFrame:
     """
-    TAM Markowitz Parabolünü (Hem Alt Verimsiz Kanat Hem Üst Etkin Kanat) üretir.
-    - Alt Kanat: Kısıtlar altındaki en düşük getiriden Global Minimum Volatiliteye (P1) kadar.
-    - Üst Kanat: Global Minimum Volatilitenin (P1) üzerinden Maksimum Getiriye (P10) kadar.
-    P1..P10 ve Max Sharpe noktaları doğrudan eğri ağına dahil edilir.
+    TAM Markowitz Parabolünü (Hem Alt Kanat Hem Üst Etkin Kanat) üretir.
+    Alt kanattaki A1..A4 ve üst kanattaki P1..P10 noktaları doğrudan eğri ağına dahil edilir.
     """
     n_assets = len(expected_returns)
     mu = expected_returns.values
@@ -367,13 +409,13 @@ def generate_efficient_frontier(
     def min_vol_obj(w):
         return np.sqrt(np.dot(w.T, np.dot(sigma, w)))
 
-    # 1. Global Min Vol (P1 / parabolün burun noktası)
+    # 1. Global Min Vol (P1)
     res_min = minimize(min_vol_obj, init_weights, method="SLSQP", bounds=bounds, constraints=sum_c)
     w_min = np.clip(res_min.x if res_min.success else init_weights, 0, max_weight)
     w_min /= np.sum(w_min)
     r_min = float(np.dot(w_min, mu))
 
-    # 2. Kısıtlar altında Mümkün Olan En Düşük Getiri (Alt kanadın başlangıcı)
+    # 2. En Düşük Getiri
     def pos_ret_obj(w):
         return np.dot(w, mu)
 
@@ -382,7 +424,7 @@ def generate_efficient_frontier(
     w_lowest /= np.sum(w_lowest)
     r_lowest = float(np.dot(w_lowest, mu))
 
-    # 3. Kısıtlar altında Mümkün Olan En Yüksek Getiri (Üst kanadın zirvesi)
+    # 3. En Yüksek Getiri
     def neg_ret_obj(w):
         return -np.dot(w, mu)
 
@@ -391,23 +433,20 @@ def generate_efficient_frontier(
     w_highest /= np.sum(w_highest)
     r_highest = float(np.dot(w_highest, mu))
 
-    # Aralık güvenlik kontrolü
     if r_lowest >= r_min:
         r_lowest = r_min - 0.05
     if r_highest <= r_min:
         r_highest = r_min + 0.05
 
-    # TAM PARABOL IZGARASI:
-    # Alt Kanat: r_lowest'ten r_min'e kadar olan dönüş (yaklaşık 40 nokta)
+    # Alt Kanat Izgarası (r_lowest'ten r_min'e)
     lower_grid = list(np.linspace(r_lowest, r_min, 40)[:-1])
-    # Üst Kanat: r_min'den r_highest'a kadar olan etkin dal (yaklaşık 90 nokta)
+    # Üst Kanat Izgarası (r_min'den r_highest'a)
     upper_grid = list(np.linspace(r_min, r_highest, max(80, points)))
 
     special_targets = []
     if include_portfolios:
         special_targets = [float(p["return"]) for p in include_portfolios]
 
-    # Tüm ızgarayı birleştir ve getiriye göre sırala (parabolün en altından en üstüne)
     all_targets = sorted(list(set(lower_grid + upper_grid + special_targets)))
 
     frontier_returns = []
@@ -415,7 +454,6 @@ def generate_efficient_frontier(
     frontier_sharpes = []
     frontier_weights = []
 
-    # Alt kanat başlangıcından başlayarak sırasıyla warm-start ile çöz
     curr_w = w_lowest
     for t_r in all_targets:
         w_pt, r_pt, v_pt, s_pt = _solve_frontier_point(t_r, curr_w, mu, sigma, bounds, max_weight, risk_free_rate)
